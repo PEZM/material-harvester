@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -7,63 +8,32 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#1e293b" />
   <title>Material Harvest</title>
-  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="manifest" href="manifest.json" />
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-    body { font-family: 'Inter', sans-serif; }
+    body { font-family: 'Inter', sans-serif; touch-action: manipulation; }
     .hide-scrollbar::-webkit-scrollbar { display: none; }
     .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   </style>
 </head>
 <body class="bg-slate-100">
   <div id="root"></div>
-  
+
   <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
+    const { useState, useEffect, useRef, useCallback } = React;
 
-    // Database helper using IndexedDB for persistence
-    const DB_NAME = 'MaterialHarvestDB';
-    const STORE_NAME = 'items';
+    // Reference objects with known dimensions (mm)
+    const REFERENCES = [
+      { id: 'card', name: 'Credit Card', width: 85.6, height: 53.98, icon: '💳' },
+      { id: 'a4', name: 'A4 Paper', width: 297, height: 210, icon: '📄' },
+      { id: 'a3', name: 'A3 Paper', width: 420, height: 297, icon: '📃' },
+      { id: 'iphone', name: 'iPhone 15', width: 147.6, height: 71.6, icon: '📱' },
+      { id: 'ruler30', name: '30cm Ruler', width: 300, height: 30, icon: '📏' },
+    ];
 
-    const openDB = () => {
-      return new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, 1);
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => resolve(request.result);
-        request.onupgradeneeded = (e) => {
-          const db = e.target.result;
-          if (!db.objectStoreNames.contains(STORE_NAME)) {
-            db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-          }
-        };
-      });
-    };
-
-    const saveItems = async (items) => {
-      const db = await openDB();
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      const store = tx.objectStore(STORE_NAME);
-      await store.clear();
-      items.forEach(item => store.put(item));
-      return tx.complete;
-    };
-
-    const loadItems = async () => {
-      const db = await openDB();
-      const tx = db.transaction(STORE_NAME, 'readonly');
-      const store = tx.objectStore(STORE_NAME);
-      return new Promise((resolve) => {
-        const request = store.getAll();
-        request.onsuccess = () => resolve(request.result || []);
-        request.onerror = () => resolve([]);
-      });
-    };
-
-    // Categories configuration
     const CATEGORIES = [
       { id: 'door', label: 'Doors', icon: '🚪', color: 'bg-amber-500' },
       { id: 'window', label: 'Windows', icon: '🪟', color: 'bg-sky-500' },
@@ -78,98 +48,389 @@
 
     const CONDITIONS = ['Excellent', 'Good', 'Fair', 'Salvageable'];
 
-    // Icons as components
-    const PlusIcon = () => (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-      </svg>
-    );
+    // IndexedDB helpers
+    const DB_NAME = 'MaterialHarvestDB';
+    const STORE_NAME = 'items';
 
-    const CameraIcon = () => (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-      </svg>
-    );
+    const openDB = () => new Promise((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, 1);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+      request.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+          db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+        }
+      };
+    });
 
-    const FilterIcon = () => (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-      </svg>
-    );
+    const saveItems = async (items) => {
+      const db = await openDB();
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      await store.clear();
+      items.forEach(item => store.put(item));
+    };
 
-    const SortIcon = () => (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-      </svg>
-    );
+    const loadItems = async () => {
+      const db = await openDB();
+      return new Promise((resolve) => {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const request = tx.objectStore(STORE_NAME).getAll();
+        request.onsuccess = () => resolve(request.result || []);
+        request.onerror = () => resolve([]);
+      });
+    };
 
-    const SearchIcon = () => (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-      </svg>
-    );
+    // Measurement Tool Component
+    function MeasurementTool({ image, onComplete, onCancel }) {
+      const canvasRef = useRef(null);
+      const [step, setStep] = useState('select-ref'); // select-ref, mark-ref, mark-object, done
+      const [reference, setReference] = useState(null);
+      const [refPoints, setRefPoints] = useState([]);
+      const [objPoints, setObjPoints] = useState([]);
+      const [dimensions, setDimensions] = useState(null);
+      const [imgSize, setImgSize] = useState({ w: 0, h: 0 });
 
-    const TrashIcon = () => (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-      </svg>
-    );
+      useEffect(() => {
+        if (!canvasRef.current || !image) return;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        img.onload = () => {
+          const maxW = window.innerWidth;
+          const maxH = window.innerHeight - 200;
+          const scale = Math.min(maxW / img.width, maxH / img.height);
+          canvas.width = img.width * scale;
+          canvas.height = img.height * scale;
+          setImgSize({ w: canvas.width, h: canvas.height, scale });
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        };
+        img.src = image;
+      }, [image]);
 
-    const CloseIcon = () => (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-      </svg>
-    );
+      const redrawCanvas = useCallback(() => {
+        if (!canvasRef.current || !image) return;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        img.onload = () => {
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          
+          // Draw reference points (blue)
+          refPoints.forEach((p, i) => {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 10, 0, Math.PI * 2);
+            ctx.fillStyle = '#3b82f6';
+            ctx.fill();
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 12px Inter';
+            ctx.textAlign = 'center';
+            ctx.fillText(i + 1, p.x, p.y + 4);
+          });
+          
+          // Draw reference lines
+          if (refPoints.length >= 2) {
+            ctx.beginPath();
+            ctx.moveTo(refPoints[0].x, refPoints[0].y);
+            refPoints.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+            if (refPoints.length === 4) ctx.closePath();
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          }
 
-    const ImageIcon = () => (
-      <svg className="w-12 h-12 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-      </svg>
-    );
+          // Draw object points (green)
+          objPoints.forEach((p, i) => {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 10, 0, Math.PI * 2);
+            ctx.fillStyle = '#22c55e';
+            ctx.fill();
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 12px Inter';
+            ctx.textAlign = 'center';
+            ctx.fillText(i + 1, p.x, p.y + 4);
+          });
+
+          // Draw object lines
+          if (objPoints.length >= 2) {
+            ctx.beginPath();
+            ctx.moveTo(objPoints[0].x, objPoints[0].y);
+            objPoints.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+            if (objPoints.length === 4) ctx.closePath();
+            ctx.strokeStyle = '#22c55e';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          }
+        };
+        img.src = image;
+      }, [image, refPoints, objPoints]);
+
+      useEffect(() => { redrawCanvas(); }, [redrawCanvas]);
+
+      const handleCanvasClick = (e) => {
+        const rect = canvasRef.current.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        if (step === 'mark-ref' && refPoints.length < 4) {
+          const newPoints = [...refPoints, { x, y }];
+          setRefPoints(newPoints);
+          if (newPoints.length === 4) setStep('mark-object');
+        } else if (step === 'mark-object' && objPoints.length < 4) {
+          const newPoints = [...objPoints, { x, y }];
+          setObjPoints(newPoints);
+          if (newPoints.length === 4) {
+            calculateDimensions(refPoints, newPoints);
+            setStep('done');
+          }
+        }
+      };
+
+      const calculateDimensions = (ref, obj) => {
+        // Calculate pixel distances for reference
+        const refWidth = Math.sqrt(Math.pow(ref[1].x - ref[0].x, 2) + Math.pow(ref[1].y - ref[0].y, 2));
+        const refHeight = Math.sqrt(Math.pow(ref[3].x - ref[0].x, 2) + Math.pow(ref[3].y - ref[0].y, 2));
+        
+        // Calculate pixel distances for object
+        const objWidthPx = Math.sqrt(Math.pow(obj[1].x - obj[0].x, 2) + Math.pow(obj[1].y - obj[0].y, 2));
+        const objHeightPx = Math.sqrt(Math.pow(obj[3].x - obj[0].x, 2) + Math.pow(obj[3].y - obj[0].y, 2));
+        
+        // Calculate mm per pixel using reference
+        const mmPerPxW = reference.width / refWidth;
+        const mmPerPxH = reference.height / refHeight;
+        const mmPerPx = (mmPerPxW + mmPerPxH) / 2;
+        
+        // Calculate object dimensions
+        const width = Math.round(objWidthPx * mmPerPx);
+        const height = Math.round(objHeightPx * mmPerPx);
+        
+        setDimensions({ width, height });
+        
+        // Draw dimensions on canvas
+        drawDimensionsOnCanvas(obj, width, height);
+      };
+      
+      const drawDimensionsOnCanvas = (obj, width, height) => {
+        if (!canvasRef.current) return;
+        const ctx = canvasRef.current.getContext('2d');
+        
+        // Format dimensions
+        const formatDim = (mm) => mm >= 1000 ? `${(mm/1000).toFixed(2)}m` : `${mm}mm`;
+        const widthText = formatDim(width);
+        const heightText = formatDim(height);
+        
+        // Draw width dimension (top edge)
+        const topMidX = (obj[0].x + obj[1].x) / 2;
+        const topMidY = (obj[0].y + obj[1].y) / 2;
+        
+        // Draw height dimension (left edge)
+        const leftMidX = (obj[0].x + obj[3].x) / 2;
+        const leftMidY = (obj[0].y + obj[3].y) / 2;
+        
+        // Draw dimension lines with arrows
+        ctx.strokeStyle = '#22c55e';
+        ctx.fillStyle = '#22c55e';
+        ctx.lineWidth = 2;
+        
+        // Width line
+        const offsetW = -25;
+        ctx.beginPath();
+        ctx.moveTo(obj[0].x, obj[0].y + offsetW);
+        ctx.lineTo(obj[1].x, obj[1].y + offsetW);
+        ctx.stroke();
+        
+        // Width arrows
+        ctx.beginPath();
+        ctx.moveTo(obj[0].x, obj[0].y + offsetW - 6);
+        ctx.lineTo(obj[0].x, obj[0].y + offsetW + 6);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(obj[1].x, obj[1].y + offsetW - 6);
+        ctx.lineTo(obj[1].x, obj[1].y + offsetW + 6);
+        ctx.stroke();
+        
+        // Height line
+        const offsetH = -25;
+        ctx.beginPath();
+        ctx.moveTo(obj[0].x + offsetH, obj[0].y);
+        ctx.lineTo(obj[3].x + offsetH, obj[3].y);
+        ctx.stroke();
+        
+        // Height arrows
+        ctx.beginPath();
+        ctx.moveTo(obj[0].x + offsetH - 6, obj[0].y);
+        ctx.lineTo(obj[0].x + offsetH + 6, obj[0].y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(obj[3].x + offsetH - 6, obj[3].y);
+        ctx.lineTo(obj[3].x + offsetH + 6, obj[3].y);
+        ctx.stroke();
+        
+        // Draw labels with background
+        ctx.font = 'bold 16px Inter, sans-serif';
+        
+        // Width label
+        const wLabelWidth = ctx.measureText(widthText).width + 12;
+        ctx.fillStyle = '#22c55e';
+        ctx.beginPath();
+        ctx.roundRect(topMidX - wLabelWidth/2, topMidY + offsetW - 28, wLabelWidth, 24, 4);
+        ctx.fill();
+        ctx.fillStyle = 'white';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(widthText, topMidX, topMidY + offsetW - 16);
+        
+        // Height label
+        const hLabelWidth = ctx.measureText(heightText).width + 12;
+        ctx.fillStyle = '#22c55e';
+        ctx.beginPath();
+        ctx.roundRect(leftMidX + offsetH - hLabelWidth/2, leftMidY - 12, hLabelWidth, 24, 4);
+        ctx.fill();
+        ctx.fillStyle = 'white';
+        ctx.fillText(heightText, leftMidX + offsetH, leftMidY);
+      };
+
+      const reset = () => {
+        setRefPoints([]);
+        setObjPoints([]);
+        setDimensions(null);
+        setStep('select-ref');
+        setReference(null);
+      };
+
+      return (
+        <div className="fixed inset-0 bg-slate-900 z-50 flex flex-col">
+          {/* Header */}
+          <div className="bg-slate-800 px-4 py-3 flex items-center justify-between">
+            <button onClick={onCancel} className="text-white">✕</button>
+            <h2 className="text-white font-semibold">Measure Object</h2>
+            <button onClick={reset} className="text-slate-400 text-sm">Reset</button>
+          </div>
+
+          {/* Instructions */}
+          <div className="bg-slate-800 px-4 py-2 text-center">
+            {step === 'select-ref' && <p className="text-slate-300 text-sm">Select a reference object you've placed in the photo</p>}
+            {step === 'mark-ref' && <p className="text-blue-400 text-sm">Tap 4 corners of the {reference?.name} (clockwise from top-left)</p>}
+            {step === 'mark-object' && <p className="text-green-400 text-sm">Now tap 4 corners of the object to measure (clockwise)</p>}
+            {step === 'done' && <p className="text-green-400 text-sm">Measurement complete!</p>}
+          </div>
+
+          {/* Canvas */}
+          <div className="flex-1 overflow-auto flex items-center justify-center bg-black">
+            <canvas
+              ref={canvasRef}
+              onClick={handleCanvasClick}
+              className="max-w-full"
+            />
+          </div>
+
+          {/* Reference Selection */}
+          {step === 'select-ref' && (
+            <div className="bg-slate-800 p-4">
+              <p className="text-slate-400 text-sm mb-3">What reference object is in the photo?</p>
+              <div className="grid grid-cols-2 gap-2">
+                {REFERENCES.map(ref => (
+                  <button
+                    key={ref.id}
+                    onClick={() => { setReference(ref); setStep('mark-ref'); }}
+                    className="bg-slate-700 p-3 rounded-xl text-white text-left flex items-center gap-3"
+                  >
+                    <span className="text-2xl">{ref.icon}</span>
+                    <div>
+                      <div className="font-medium">{ref.name}</div>
+                      <div className="text-xs text-slate-400">{ref.width} × {ref.height} mm</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Results */}
+          {step === 'done' && dimensions && (
+            <div className="bg-slate-800 p-4">
+              <div className="bg-green-500/20 border border-green-500 rounded-xl p-4 mb-4">
+                <p className="text-green-400 text-sm mb-2">Estimated Dimensions</p>
+                <div className="flex gap-6 text-white">
+                  <div>
+                    <span className="text-3xl font-bold">{dimensions.width >= 1000 ? (dimensions.width/1000).toFixed(2) : dimensions.width}</span>
+                    <span className="text-slate-400 ml-1">{dimensions.width >= 1000 ? 'm' : 'mm'} W</span>
+                  </div>
+                  <div>
+                    <span className="text-3xl font-bold">{dimensions.height >= 1000 ? (dimensions.height/1000).toFixed(2) : dimensions.height}</span>
+                    <span className="text-slate-400 ml-1">{dimensions.height >= 1000 ? 'm' : 'mm'} H</span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    const link = document.createElement('a');
+                    link.download = 'measured-object.jpg';
+                    link.href = canvasRef.current.toDataURL('image/jpeg', 0.9);
+                    link.click();
+                  }}
+                  className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-semibold"
+                >
+                  💾 Save Image
+                </button>
+                <button
+                  onClick={() => onComplete(dimensions, canvasRef.current.toDataURL('image/jpeg', 0.9))}
+                  className="flex-1 py-3 bg-green-500 text-white rounded-xl font-semibold"
+                >
+                  ✓ Use Dimensions
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Progress indicator */}
+          {(step === 'mark-ref' || step === 'mark-object') && (
+            <div className="bg-slate-800 px-4 py-3 flex justify-center gap-2">
+              {[0,1,2,3].map(i => (
+                <div
+                  key={i}
+                  className={`w-3 h-3 rounded-full ${
+                    step === 'mark-ref'
+                      ? i < refPoints.length ? 'bg-blue-500' : 'bg-slate-600'
+                      : i < objPoints.length ? 'bg-green-500' : 'bg-slate-600'
+                  }`}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
 
     // Main App Component
     function App() {
       const [items, setItems] = useState([]);
-      const [view, setView] = useState('list'); // 'list', 'add', 'detail'
+      const [view, setView] = useState('list');
       const [selectedItem, setSelectedItem] = useState(null);
       const [filter, setFilter] = useState('all');
       const [sortBy, setSortBy] = useState('date');
       const [sortOrder, setSortOrder] = useState('desc');
       const [searchQuery, setSearchQuery] = useState('');
-      const [showFilterMenu, setShowFilterMenu] = useState(false);
       const [showSortMenu, setShowSortMenu] = useState(false);
       const [isLoading, setIsLoading] = useState(true);
 
-      // Load items on mount
       useEffect(() => {
-        loadItems().then(loaded => {
-          setItems(loaded);
-          setIsLoading(false);
-        });
+        loadItems().then(loaded => { setItems(loaded); setIsLoading(false); });
       }, []);
 
-      // Save items when they change
       useEffect(() => {
-        if (!isLoading) {
-          saveItems(items);
-        }
+        if (!isLoading) saveItems(items);
       }, [items, isLoading]);
 
       const addItem = (newItem) => {
-        const item = {
-          ...newItem,
-          id: Date.now().toString(),
-          createdAt: new Date().toISOString(),
-        };
-        setItems(prev => [item, ...prev]);
+        setItems(prev => [{ ...newItem, id: Date.now().toString(), createdAt: new Date().toISOString() }, ...prev]);
         setView('list');
       };
 
       const updateItem = (updatedItem) => {
-        setItems(prev => prev.map(item => 
-          item.id === updatedItem.id ? updatedItem : item
-        ));
+        setItems(prev => prev.map(item => item.id === updatedItem.id ? updatedItem : item));
         setSelectedItem(updatedItem);
       };
 
@@ -179,52 +440,29 @@
         setSelectedItem(null);
       };
 
-      // Filter and sort items
       const filteredItems = items
         .filter(item => filter === 'all' || item.category === filter)
         .filter(item => {
           if (!searchQuery) return true;
-          const query = searchQuery.toLowerCase();
-          return (
-            item.name?.toLowerCase().includes(query) ||
-            item.location?.toLowerCase().includes(query) ||
-            item.notes?.toLowerCase().includes(query)
-          );
+          const q = searchQuery.toLowerCase();
+          return item.name?.toLowerCase().includes(q) || item.location?.toLowerCase().includes(q) || item.notes?.toLowerCase().includes(q);
         })
         .sort((a, b) => {
-          let comparison = 0;
-          switch (sortBy) {
-            case 'name':
-              comparison = (a.name || '').localeCompare(b.name || '');
-              break;
-            case 'category':
-              comparison = (a.category || '').localeCompare(b.category || '');
-              break;
-            case 'condition':
-              comparison = CONDITIONS.indexOf(a.condition) - CONDITIONS.indexOf(b.condition);
-              break;
-            case 'date':
-            default:
-              comparison = new Date(b.createdAt) - new Date(a.createdAt);
-              break;
-          }
-          return sortOrder === 'asc' ? comparison : -comparison;
+          let cmp = 0;
+          if (sortBy === 'name') cmp = (a.name || '').localeCompare(b.name || '');
+          else if (sortBy === 'category') cmp = (a.category || '').localeCompare(b.category || '');
+          else if (sortBy === 'condition') cmp = CONDITIONS.indexOf(a.condition) - CONDITIONS.indexOf(b.condition);
+          else cmp = new Date(b.createdAt) - new Date(a.createdAt);
+          return sortOrder === 'asc' ? cmp : -cmp;
         });
 
-      if (isLoading) {
-        return (
-          <div className="min-h-screen flex items-center justify-center bg-slate-100">
-            <div className="text-slate-500">Loading...</div>
-          </div>
-        );
-      }
+      if (isLoading) return <div className="min-h-screen flex items-center justify-center"><div className="text-slate-500">Loading...</div></div>;
 
       return (
         <div className="min-h-screen bg-slate-100 pb-20">
-          {/* Header */}
           <header className="bg-slate-800 text-white px-4 py-4 sticky top-0 z-40">
             <div className="flex items-center justify-between">
-              <h1 className="text-xl font-bold tracking-tight">Material Harvest</h1>
+              <h1 className="text-xl font-bold">Material Harvest</h1>
               <div className="text-sm text-slate-400">{items.length} items</div>
             </div>
           </header>
@@ -240,8 +478,6 @@
               setSortOrder={setSortOrder}
               searchQuery={searchQuery}
               setSearchQuery={setSearchQuery}
-              showFilterMenu={showFilterMenu}
-              setShowFilterMenu={setShowFilterMenu}
               showSortMenu={showSortMenu}
               setShowSortMenu={setShowSortMenu}
               onItemClick={(item) => { setSelectedItem(item); setView('detail'); }}
@@ -249,13 +485,7 @@
             />
           )}
 
-          {view === 'add' && (
-            <AddItemView
-              onSave={addItem}
-              onCancel={() => setView('list')}
-            />
-          )}
-
+          {view === 'add' && <AddItemView onSave={addItem} onCancel={() => setView('list')} />}
           {view === 'detail' && selectedItem && (
             <DetailView
               item={selectedItem}
@@ -268,92 +498,40 @@
       );
     }
 
-    // List View Component
-    function ListView({ 
-      items, filter, setFilter, sortBy, setSortBy, sortOrder, setSortOrder,
-      searchQuery, setSearchQuery, showFilterMenu, setShowFilterMenu,
-      showSortMenu, setShowSortMenu, onItemClick, onAddClick 
-    }) {
+    function ListView({ items, filter, setFilter, sortBy, setSortBy, sortOrder, setSortOrder, searchQuery, setSearchQuery, showSortMenu, setShowSortMenu, onItemClick, onAddClick }) {
       return (
         <>
-          {/* Search Bar */}
-          <div className="px-4 py-3 bg-white border-b border-slate-200">
+          <div className="px-4 py-3 bg-white border-b">
             <div className="relative">
-              <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-slate-400">
-                <SearchIcon />
-              </div>
-              <input
-                type="text"
-                placeholder="Search items..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 bg-slate-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
-              />
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+              <input type="text" placeholder="Search items..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-slate-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-slate-300" />
             </div>
           </div>
 
-          {/* Category Pills */}
-          <div className="px-4 py-3 bg-white border-b border-slate-200 overflow-x-auto hide-scrollbar">
+          <div className="px-4 py-3 bg-white border-b overflow-x-auto hide-scrollbar">
             <div className="flex gap-2">
-              <button
-                onClick={() => setFilter('all')}
-                className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
-                  filter === 'all' 
-                    ? 'bg-slate-800 text-white' 
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                All
-              </button>
+              <button onClick={() => setFilter('all')} className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap ${filter === 'all' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'}`}>All</button>
               {CATEGORIES.map(cat => (
-                <button
-                  key={cat.id}
-                  onClick={() => setFilter(cat.id)}
-                  className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
-                    filter === cat.id 
-                      ? 'bg-slate-800 text-white' 
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
-                >
-                  <span>{cat.icon}</span>
-                  <span>{cat.label}</span>
+                <button key={cat.id} onClick={() => setFilter(cat.id)} className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap flex items-center gap-1.5 ${filter === cat.id ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                  <span>{cat.icon}</span><span>{cat.label}</span>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Sort Controls */}
           <div className="px-4 py-2 flex items-center justify-between text-sm text-slate-500">
             <span>{items.length} item{items.length !== 1 ? 's' : ''}</span>
             <div className="relative">
-              <button
-                onClick={() => setShowSortMenu(!showSortMenu)}
-                className="flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-200"
-              >
-                <SortIcon />
+              <button onClick={() => setShowSortMenu(!showSortMenu)} className="flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-200">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" /></svg>
                 <span className="capitalize">{sortBy}</span>
                 <span className="text-xs">({sortOrder === 'asc' ? '↑' : '↓'})</span>
               </button>
               {showSortMenu && (
-                <div className="absolute right-0 mt-1 bg-white rounded-lg shadow-lg border border-slate-200 py-1 z-50 min-w-[140px]">
-                  {['date', 'name', 'category', 'condition'].map(option => (
-                    <button
-                      key={option}
-                      onClick={() => {
-                        if (sortBy === option) {
-                          setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-                        } else {
-                          setSortBy(option);
-                          setSortOrder('desc');
-                        }
-                        setShowSortMenu(false);
-                      }}
-                      className={`w-full px-4 py-2 text-left text-sm hover:bg-slate-100 capitalize flex justify-between ${
-                        sortBy === option ? 'text-slate-900 font-medium' : 'text-slate-600'
-                      }`}
-                    >
-                      {option}
-                      {sortBy === option && <span>{sortOrder === 'asc' ? '↑' : '↓'}</span>}
+                <div className="absolute right-0 mt-1 bg-white rounded-lg shadow-lg border py-1 z-50 min-w-[140px]">
+                  {['date', 'name', 'category', 'condition'].map(opt => (
+                    <button key={opt} onClick={() => { sortBy === opt ? setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc') : (setSortBy(opt), setSortOrder('desc')); setShowSortMenu(false); }} className={`w-full px-4 py-2 text-left text-sm hover:bg-slate-100 capitalize flex justify-between ${sortBy === opt ? 'font-medium' : 'text-slate-600'}`}>
+                      {opt}{sortBy === opt && <span>{sortOrder === 'asc' ? '↑' : '↓'}</span>}
                     </button>
                   ))}
                 </div>
@@ -361,7 +539,6 @@
             </div>
           </div>
 
-          {/* Items Grid */}
           <div className="px-4 pb-24">
             {items.length === 0 ? (
               <div className="text-center py-16 text-slate-400">
@@ -371,97 +548,57 @@
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-3">
-                {items.map(item => (
-                  <ItemCard key={item.id} item={item} onClick={() => onItemClick(item)} />
-                ))}
+                {items.map(item => <ItemCard key={item.id} item={item} onClick={() => onItemClick(item)} />)}
               </div>
             )}
           </div>
 
-          {/* Floating Add Button */}
-          <button
-            onClick={onAddClick}
-            className="fixed bottom-6 right-6 w-14 h-14 bg-slate-800 text-white rounded-full shadow-lg flex items-center justify-center hover:bg-slate-700 active:scale-95 transition-transform z-50"
-          >
-            <PlusIcon />
+          <button onClick={onAddClick} className="fixed bottom-6 right-6 w-14 h-14 bg-slate-800 text-white rounded-full shadow-lg flex items-center justify-center z-50">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
           </button>
         </>
       );
     }
 
-    // Item Card Component
     function ItemCard({ item, onClick }) {
-      const category = CATEGORIES.find(c => c.id === item.category) || CATEGORIES[8];
-      
+      const cat = CATEGORIES.find(c => c.id === item.category) || CATEGORIES[8];
       return (
-        <button
-          onClick={onClick}
-          className="bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow text-left"
-        >
+        <button onClick={onClick} className="bg-white rounded-xl overflow-hidden shadow-sm text-left">
           <div className="aspect-square bg-slate-100 relative">
-            {item.image ? (
-              <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-4xl">
-                {category.icon}
-              </div>
-            )}
-            <div className={`absolute top-2 left-2 ${category.color} text-white text-xs px-2 py-0.5 rounded-full`}>
-              {category.label}
-            </div>
+            {item.image ? <img src={item.image} alt={item.name} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-4xl">{cat.icon}</div>}
+            <div className={`absolute top-2 left-2 ${cat.color} text-white text-xs px-2 py-0.5 rounded-full`}>{cat.label}</div>
           </div>
           <div className="p-3">
             <h3 className="font-medium text-slate-800 truncate">{item.name || 'Unnamed'}</h3>
             <div className="flex items-center justify-between mt-1">
               <span className="text-xs text-slate-500">{item.condition}</span>
-              {item.quantity > 1 && (
-                <span className="text-xs bg-slate-100 px-2 py-0.5 rounded-full">×{item.quantity}</span>
-              )}
+              {item.quantity > 1 && <span className="text-xs bg-slate-100 px-2 py-0.5 rounded-full">×{item.quantity}</span>}
             </div>
           </div>
         </button>
       );
     }
 
-    // Add Item View Component
     function AddItemView({ onSave, onCancel }) {
-      const [formData, setFormData] = useState({
-        name: '',
-        category: 'door',
-        condition: 'Good',
-        quantity: 1,
-        width: '',
-        height: '',
-        depth: '',
-        location: '',
-        notes: '',
-        image: null,
-      });
-      const fileInputRef = useRef(null);
-      const cameraInputRef = useRef(null);
+      const [formData, setFormData] = useState({ name: '', category: 'door', condition: 'Good', quantity: 1, width: '', height: '', depth: '', location: '', notes: '', image: null });
+      const [showMeasure, setShowMeasure] = useState(false);
+      const fileRef = useRef(null);
+      const camRef = useRef(null);
 
-      const handleImageSelect = (e) => {
+      const handleImage = (e) => {
         const file = e.target.files?.[0];
         if (file) {
           const reader = new FileReader();
           reader.onloadend = () => {
-            // Compress image
             const img = new Image();
             img.onload = () => {
               const canvas = document.createElement('canvas');
-              const maxSize = 800;
-              let { width, height } = img;
-              if (width > height && width > maxSize) {
-                height = (height * maxSize) / width;
-                width = maxSize;
-              } else if (height > maxSize) {
-                width = (width * maxSize) / height;
-                height = maxSize;
-              }
-              canvas.width = width;
-              canvas.height = height;
-              const ctx = canvas.getContext('2d');
-              ctx.drawImage(img, 0, 0, width, height);
+              const max = 800;
+              let { width: w, height: h } = img;
+              if (w > h && w > max) { h = (h * max) / w; w = max; }
+              else if (h > max) { w = (w * max) / h; h = max; }
+              canvas.width = w; canvas.height = h;
+              canvas.getContext('2d').drawImage(img, 0, 0, w, h);
               setFormData(prev => ({ ...prev, image: canvas.toDataURL('image/jpeg', 0.7) }));
             };
             img.src = reader.result;
@@ -470,91 +607,67 @@
         }
       };
 
+      const handleMeasureComplete = (dims, annotatedImage) => {
+        setFormData(prev => ({ 
+          ...prev, 
+          width: dims.width.toString(), 
+          height: dims.height.toString(),
+          image: annotatedImage || prev.image
+        }));
+        setShowMeasure(false);
+      };
+
       const handleSubmit = () => {
-        if (!formData.name.trim()) {
-          alert('Please enter a name');
-          return;
-        }
+        if (!formData.name.trim()) { alert('Please enter a name'); return; }
         onSave(formData);
       };
 
       return (
         <div className="bg-white min-h-screen">
-          {/* Header */}
-          <div className="sticky top-0 bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between z-40">
-            <button onClick={onCancel} className="text-slate-500">
-              <CloseIcon />
-            </button>
+          <div className="sticky top-0 bg-white border-b px-4 py-3 flex items-center justify-between z-40">
+            <button onClick={onCancel} className="text-slate-500">✕</button>
             <h2 className="font-semibold text-lg">Add Item</h2>
-            <button
-              onClick={handleSubmit}
-              className="px-4 py-1.5 bg-slate-800 text-white rounded-lg text-sm font-medium"
-            >
-              Save
-            </button>
+            <button onClick={handleSubmit} className="px-4 py-1.5 bg-slate-800 text-white rounded-lg text-sm font-medium">Save</button>
           </div>
 
           <div className="p-4 space-y-5">
-            {/* Image Section */}
+            {/* Photo + Measure */}
             <div className="space-y-3">
               <label className="text-sm font-medium text-slate-700">Photo</label>
-              <div className="flex gap-3">
+              <div className="flex gap-3 flex-wrap">
                 {formData.image ? (
                   <div className="relative w-32 h-32 rounded-xl overflow-hidden">
                     <img src={formData.image} alt="Preview" className="w-full h-full object-cover" />
-                    <button
-                      onClick={() => setFormData(prev => ({ ...prev, image: null }))}
-                      className="absolute top-1 right-1 w-6 h-6 bg-black/50 rounded-full flex items-center justify-center text-white"
-                    >
-                      <CloseIcon />
-                    </button>
+                    <button onClick={() => setFormData(prev => ({ ...prev, image: null }))} className="absolute top-1 right-1 w-6 h-6 bg-black/50 rounded-full flex items-center justify-center text-white text-sm">✕</button>
                   </div>
                 ) : (
                   <>
-                    <button
-                      onClick={() => cameraInputRef.current?.click()}
-                      className="w-32 h-32 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center gap-2 text-slate-400 hover:border-slate-400"
-                    >
-                      <CameraIcon />
+                    <button onClick={() => camRef.current?.click()} className="w-32 h-32 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center gap-2 text-slate-400">
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                       <span className="text-xs">Camera</span>
                     </button>
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="w-32 h-32 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center gap-2 text-slate-400 hover:border-slate-400"
-                    >
-                      <ImageIcon />
+                    <button onClick={() => fileRef.current?.click()} className="w-32 h-32 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center gap-2 text-slate-400">
+                      <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                       <span className="text-xs">Gallery</span>
                     </button>
                   </>
                 )}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageSelect}
-                  className="hidden"
-                />
-                <input
-                  ref={cameraInputRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  onChange={handleImageSelect}
-                  className="hidden"
-                />
+                {formData.image && (
+                  <button onClick={() => setShowMeasure(true)} className="w-32 h-32 border-2 border-green-500 bg-green-50 rounded-xl flex flex-col items-center justify-center gap-2 text-green-600">
+                    <span className="text-3xl">📐</span>
+                    <span className="text-xs font-medium">Measure</span>
+                  </button>
+                )}
+                <input ref={fileRef} type="file" accept="image/*" onChange={handleImage} className="hidden" />
+                <input ref={camRef} type="file" accept="image/*" capture="environment" onChange={handleImage} className="hidden" />
               </div>
+              {!formData.image && <p className="text-xs text-slate-400">Tip: Include a credit card or A4 paper in the photo to measure dimensions</p>}
             </div>
 
             {/* Name */}
             <div>
               <label className="text-sm font-medium text-slate-700">Name *</label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                placeholder="e.g., Victorian sash window"
-                className="mt-1 w-full px-4 py-3 bg-slate-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-300"
-              />
+              <input type="text" value={formData.name} onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))} placeholder="e.g., Victorian sash window" className="mt-1 w-full px-4 py-3 bg-slate-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-300" />
             </div>
 
             {/* Category */}
@@ -562,15 +675,7 @@
               <label className="text-sm font-medium text-slate-700">Category</label>
               <div className="mt-2 grid grid-cols-3 gap-2">
                 {CATEGORIES.map(cat => (
-                  <button
-                    key={cat.id}
-                    onClick={() => setFormData(prev => ({ ...prev, category: cat.id }))}
-                    className={`p-3 rounded-xl border-2 flex flex-col items-center gap-1 transition-colors ${
-                      formData.category === cat.id
-                        ? 'border-slate-800 bg-slate-50'
-                        : 'border-slate-200 hover:border-slate-300'
-                    }`}
-                  >
+                  <button key={cat.id} onClick={() => setFormData(prev => ({ ...prev, category: cat.id }))} className={`p-3 rounded-xl border-2 flex flex-col items-center gap-1 ${formData.category === cat.id ? 'border-slate-800 bg-slate-50' : 'border-slate-200'}`}>
                     <span className="text-2xl">{cat.icon}</span>
                     <span className="text-xs font-medium">{cat.label}</span>
                   </button>
@@ -583,17 +688,7 @@
               <label className="text-sm font-medium text-slate-700">Condition</label>
               <div className="mt-2 flex gap-2">
                 {CONDITIONS.map(cond => (
-                  <button
-                    key={cond}
-                    onClick={() => setFormData(prev => ({ ...prev, condition: cond }))}
-                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
-                      formData.condition === cond
-                        ? 'bg-slate-800 text-white'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    {cond}
-                  </button>
+                  <button key={cond} onClick={() => setFormData(prev => ({ ...prev, condition: cond }))} className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium ${formData.condition === cond ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'}`}>{cond}</button>
                 ))}
               </div>
             </div>
@@ -602,19 +697,9 @@
             <div>
               <label className="text-sm font-medium text-slate-700">Quantity</label>
               <div className="mt-2 flex items-center gap-4">
-                <button
-                  onClick={() => setFormData(prev => ({ ...prev, quantity: Math.max(1, prev.quantity - 1) }))}
-                  className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-xl font-bold text-slate-600"
-                >
-                  −
-                </button>
+                <button onClick={() => setFormData(prev => ({ ...prev, quantity: Math.max(1, prev.quantity - 1) }))} className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-xl font-bold text-slate-600">−</button>
                 <span className="text-2xl font-semibold w-12 text-center">{formData.quantity}</span>
-                <button
-                  onClick={() => setFormData(prev => ({ ...prev, quantity: prev.quantity + 1 }))}
-                  className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-xl font-bold text-slate-600"
-                >
-                  +
-                </button>
+                <button onClick={() => setFormData(prev => ({ ...prev, quantity: prev.quantity + 1 }))} className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-xl font-bold text-slate-600">+</button>
               </div>
             </div>
 
@@ -623,33 +708,15 @@
               <label className="text-sm font-medium text-slate-700">Dimensions (mm)</label>
               <div className="mt-2 grid grid-cols-3 gap-3">
                 <div>
-                  <input
-                    type="number"
-                    value={formData.width}
-                    onChange={(e) => setFormData(prev => ({ ...prev, width: e.target.value }))}
-                    placeholder="Width"
-                    className="w-full px-3 py-2.5 bg-slate-100 rounded-xl text-center focus:outline-none focus:ring-2 focus:ring-slate-300"
-                  />
+                  <input type="number" value={formData.width} onChange={(e) => setFormData(prev => ({ ...prev, width: e.target.value }))} placeholder="Width" className="w-full px-3 py-2.5 bg-slate-100 rounded-xl text-center focus:outline-none focus:ring-2 focus:ring-slate-300" />
                   <span className="text-xs text-slate-400 block text-center mt-1">W</span>
                 </div>
                 <div>
-                  <input
-                    type="number"
-                    value={formData.height}
-                    onChange={(e) => setFormData(prev => ({ ...prev, height: e.target.value }))}
-                    placeholder="Height"
-                    className="w-full px-3 py-2.5 bg-slate-100 rounded-xl text-center focus:outline-none focus:ring-2 focus:ring-slate-300"
-                  />
+                  <input type="number" value={formData.height} onChange={(e) => setFormData(prev => ({ ...prev, height: e.target.value }))} placeholder="Height" className="w-full px-3 py-2.5 bg-slate-100 rounded-xl text-center focus:outline-none focus:ring-2 focus:ring-slate-300" />
                   <span className="text-xs text-slate-400 block text-center mt-1">H</span>
                 </div>
                 <div>
-                  <input
-                    type="number"
-                    value={formData.depth}
-                    onChange={(e) => setFormData(prev => ({ ...prev, depth: e.target.value }))}
-                    placeholder="Depth"
-                    className="w-full px-3 py-2.5 bg-slate-100 rounded-xl text-center focus:outline-none focus:ring-2 focus:ring-slate-300"
-                  />
+                  <input type="number" value={formData.depth} onChange={(e) => setFormData(prev => ({ ...prev, depth: e.target.value }))} placeholder="Depth" className="w-full px-3 py-2.5 bg-slate-100 rounded-xl text-center focus:outline-none focus:ring-2 focus:ring-slate-300" />
                   <span className="text-xs text-slate-400 block text-center mt-1">D</span>
                 </div>
               </div>
@@ -658,45 +725,38 @@
             {/* Location */}
             <div>
               <label className="text-sm font-medium text-slate-700">Source / Location</label>
-              <input
-                type="text"
-                value={formData.location}
-                onChange={(e) => setFormData(prev => ({ ...prev, location: e.target.value }))}
-                placeholder="e.g., Salvo Yard, Kennington"
-                className="mt-1 w-full px-4 py-3 bg-slate-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-300"
-              />
+              <input type="text" value={formData.location} onChange={(e) => setFormData(prev => ({ ...prev, location: e.target.value }))} placeholder="e.g., Salvo Yard, Kennington" className="mt-1 w-full px-4 py-3 bg-slate-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-300" />
             </div>
 
             {/* Notes */}
             <div>
               <label className="text-sm font-medium text-slate-700">Notes</label>
-              <textarea
-                value={formData.notes}
-                onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
-                placeholder="Additional details, material, age, etc."
-                rows={3}
-                className="mt-1 w-full px-4 py-3 bg-slate-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-300 resize-none"
-              />
+              <textarea value={formData.notes} onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))} placeholder="Additional details, material, age, etc." rows={3} className="mt-1 w-full px-4 py-3 bg-slate-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-300 resize-none" />
             </div>
           </div>
+
+          {showMeasure && formData.image && (
+            <MeasurementTool
+              image={formData.image}
+              onComplete={handleMeasureComplete}
+              onCancel={() => setShowMeasure(false)}
+            />
+          )}
         </div>
       );
     }
 
-    // Detail View Component
     function DetailView({ item, onBack, onUpdate, onDelete }) {
       const [isEditing, setIsEditing] = useState(false);
       const [editData, setEditData] = useState(item);
       const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-      const category = CATEGORIES.find(c => c.id === item.category) || CATEGORIES[8];
-      const fileInputRef = useRef(null);
+      const [showMeasure, setShowMeasure] = useState(false);
+      const cat = CATEGORIES.find(c => c.id === item.category) || CATEGORIES[8];
+      const fileRef = useRef(null);
 
-      const handleSave = () => {
-        onUpdate(editData);
-        setIsEditing(false);
-      };
+      const handleSave = () => { onUpdate(editData); setIsEditing(false); };
 
-      const handleImageSelect = (e) => {
+      const handleImage = (e) => {
         const file = e.target.files?.[0];
         if (file) {
           const reader = new FileReader();
@@ -704,19 +764,12 @@
             const img = new Image();
             img.onload = () => {
               const canvas = document.createElement('canvas');
-              const maxSize = 800;
-              let { width, height } = img;
-              if (width > height && width > maxSize) {
-                height = (height * maxSize) / width;
-                width = maxSize;
-              } else if (height > maxSize) {
-                width = (width * maxSize) / height;
-                height = maxSize;
-              }
-              canvas.width = width;
-              canvas.height = height;
-              const ctx = canvas.getContext('2d');
-              ctx.drawImage(img, 0, 0, width, height);
+              const max = 800;
+              let { width: w, height: h } = img;
+              if (w > h && w > max) { h = (h * max) / w; w = max; }
+              else if (h > max) { w = (w * max) / h; h = max; }
+              canvas.width = w; canvas.height = h;
+              canvas.getContext('2d').drawImage(img, 0, 0, w, h);
               setEditData(prev => ({ ...prev, image: canvas.toDataURL('image/jpeg', 0.7) }));
             };
             img.src = reader.result;
@@ -725,65 +778,46 @@
         }
       };
 
+      const handleMeasureComplete = (dims, annotatedImage) => {
+        setEditData(prev => ({ 
+          ...prev, 
+          width: dims.width.toString(), 
+          height: dims.height.toString(),
+          image: annotatedImage || prev.image
+        }));
+        setShowMeasure(false);
+      };
+
       if (isEditing) {
         return (
           <div className="bg-white min-h-screen">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between z-40">
-              <button onClick={() => { setIsEditing(false); setEditData(item); }} className="text-slate-500">
-                Cancel
-              </button>
+            <div className="sticky top-0 bg-white border-b px-4 py-3 flex items-center justify-between z-40">
+              <button onClick={() => { setIsEditing(false); setEditData(item); }} className="text-slate-500">Cancel</button>
               <h2 className="font-semibold">Edit Item</h2>
-              <button onClick={handleSave} className="px-4 py-1.5 bg-slate-800 text-white rounded-lg text-sm font-medium">
-                Save
-              </button>
+              <button onClick={handleSave} className="px-4 py-1.5 bg-slate-800 text-white rounded-lg text-sm font-medium">Save</button>
             </div>
             
             <div className="p-4 space-y-4">
-              {/* Image */}
               <div className="aspect-video bg-slate-100 rounded-xl overflow-hidden relative">
-                {editData.image ? (
-                  <img src={editData.image} alt="" className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-6xl">{category.icon}</div>
-                )}
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="absolute bottom-3 right-3 px-3 py-1.5 bg-black/50 text-white rounded-lg text-sm"
-                >
-                  Change Photo
-                </button>
-                <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
+                {editData.image ? <img src={editData.image} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-6xl">{cat.icon}</div>}
+                <div className="absolute bottom-3 right-3 flex gap-2">
+                  {editData.image && <button onClick={() => setShowMeasure(true)} className="px-3 py-1.5 bg-green-500 text-white rounded-lg text-sm">📐 Measure</button>}
+                  <button onClick={() => fileRef.current?.click()} className="px-3 py-1.5 bg-black/50 text-white rounded-lg text-sm">Change</button>
+                </div>
+                <input ref={fileRef} type="file" accept="image/*" onChange={handleImage} className="hidden" />
               </div>
 
-              <input
-                type="text"
-                value={editData.name}
-                onChange={(e) => setEditData(prev => ({ ...prev, name: e.target.value }))}
-                className="w-full px-4 py-3 bg-slate-100 rounded-xl font-medium"
-                placeholder="Name"
-              />
+              <input type="text" value={editData.name} onChange={(e) => setEditData(prev => ({ ...prev, name: e.target.value }))} className="w-full px-4 py-3 bg-slate-100 rounded-xl font-medium" placeholder="Name" />
 
               <div className="grid grid-cols-3 gap-2">
-                {CATEGORIES.map(cat => (
-                  <button
-                    key={cat.id}
-                    onClick={() => setEditData(prev => ({ ...prev, category: cat.id }))}
-                    className={`p-2 rounded-lg border text-sm ${editData.category === cat.id ? 'border-slate-800 bg-slate-50' : 'border-slate-200'}`}
-                  >
-                    {cat.icon} {cat.label}
-                  </button>
+                {CATEGORIES.map(c => (
+                  <button key={c.id} onClick={() => setEditData(prev => ({ ...prev, category: c.id }))} className={`p-2 rounded-lg border text-sm ${editData.category === c.id ? 'border-slate-800 bg-slate-50' : 'border-slate-200'}`}>{c.icon} {c.label}</button>
                 ))}
               </div>
 
               <div className="flex gap-2">
                 {CONDITIONS.map(cond => (
-                  <button
-                    key={cond}
-                    onClick={() => setEditData(prev => ({ ...prev, condition: cond }))}
-                    className={`flex-1 py-2 rounded-lg text-sm ${editData.condition === cond ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}
-                  >
-                    {cond}
-                  </button>
+                  <button key={cond} onClick={() => setEditData(prev => ({ ...prev, condition: cond }))} className={`flex-1 py-2 rounded-lg text-sm ${editData.condition === cond ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>{cond}</button>
                 ))}
               </div>
 
@@ -793,56 +827,34 @@
                 <input type="number" value={editData.depth} onChange={(e) => setEditData(prev => ({ ...prev, depth: e.target.value }))} placeholder="Depth" className="px-3 py-2 bg-slate-100 rounded-xl text-center" />
               </div>
 
-              <input
-                type="text"
-                value={editData.location}
-                onChange={(e) => setEditData(prev => ({ ...prev, location: e.target.value }))}
-                className="w-full px-4 py-3 bg-slate-100 rounded-xl"
-                placeholder="Location"
-              />
-
-              <textarea
-                value={editData.notes}
-                onChange={(e) => setEditData(prev => ({ ...prev, notes: e.target.value }))}
-                className="w-full px-4 py-3 bg-slate-100 rounded-xl resize-none"
-                rows={3}
-                placeholder="Notes"
-              />
+              <input type="text" value={editData.location} onChange={(e) => setEditData(prev => ({ ...prev, location: e.target.value }))} className="w-full px-4 py-3 bg-slate-100 rounded-xl" placeholder="Location" />
+              <textarea value={editData.notes} onChange={(e) => setEditData(prev => ({ ...prev, notes: e.target.value }))} className="w-full px-4 py-3 bg-slate-100 rounded-xl resize-none" rows={3} placeholder="Notes" />
             </div>
+
+            {showMeasure && editData.image && (
+              <MeasurementTool image={editData.image} onComplete={handleMeasureComplete} onCancel={() => setShowMeasure(false)} />
+            )}
           </div>
         );
       }
 
       return (
         <div className="bg-white min-h-screen">
-          {/* Header */}
-          <div className="sticky top-0 bg-white/90 backdrop-blur border-b border-slate-200 px-4 py-3 flex items-center justify-between z-40">
-            <button onClick={onBack} className="text-slate-500">
-              ← Back
-            </button>
+          <div className="sticky top-0 bg-white/90 backdrop-blur border-b px-4 py-3 flex items-center justify-between z-40">
+            <button onClick={onBack} className="text-slate-500">← Back</button>
             <div className="flex gap-2">
-              <button onClick={() => setIsEditing(true)} className="px-4 py-1.5 bg-slate-100 rounded-lg text-sm font-medium">
-                Edit
-              </button>
+              <button onClick={() => setIsEditing(true)} className="px-4 py-1.5 bg-slate-100 rounded-lg text-sm font-medium">Edit</button>
               <button onClick={() => setShowDeleteConfirm(true)} className="p-1.5 text-red-500">
-                <TrashIcon />
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
               </button>
             </div>
           </div>
 
-          {/* Image */}
           <div className="aspect-video bg-slate-100 relative">
-            {item.image ? (
-              <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-6xl">{category.icon}</div>
-            )}
-            <div className={`absolute bottom-4 left-4 ${category.color} text-white px-3 py-1 rounded-full text-sm font-medium`}>
-              {category.icon} {category.label}
-            </div>
+            {item.image ? <img src={item.image} alt={item.name} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-6xl">{cat.icon}</div>}
+            <div className={`absolute bottom-4 left-4 ${cat.color} text-white px-3 py-1 rounded-full text-sm font-medium`}>{cat.icon} {cat.label}</div>
           </div>
 
-          {/* Details */}
           <div className="p-4 space-y-4">
             <div>
               <h1 className="text-2xl font-bold text-slate-800">{item.name}</h1>
@@ -887,25 +899,14 @@
             )}
           </div>
 
-          {/* Delete Confirmation Modal */}
           {showDeleteConfirm && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
               <div className="bg-white rounded-2xl p-6 max-w-sm w-full">
                 <h3 className="text-lg font-semibold mb-2">Delete Item?</h3>
                 <p className="text-slate-500 mb-6">This action cannot be undone.</p>
                 <div className="flex gap-3">
-                  <button
-                    onClick={() => setShowDeleteConfirm(false)}
-                    className="flex-1 py-3 bg-slate-100 rounded-xl font-medium"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={onDelete}
-                    className="flex-1 py-3 bg-red-500 text-white rounded-xl font-medium"
-                  >
-                    Delete
-                  </button>
+                  <button onClick={() => setShowDeleteConfirm(false)} className="flex-1 py-3 bg-slate-100 rounded-xl font-medium">Cancel</button>
+                  <button onClick={onDelete} className="flex-1 py-3 bg-red-500 text-white rounded-xl font-medium">Delete</button>
                 </div>
               </div>
             </div>
@@ -916,5 +917,6 @@
 
     ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   </script>
+
 </body>
 </html>
